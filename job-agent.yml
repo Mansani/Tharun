@@ -1,0 +1,96 @@
+name: Job agent
+
+on:
+  schedule:
+    - cron: "17 3 * * 1-5"   # 08:47 IST, Monday-Friday (GitHub cron is in UTC)
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+    inputs:
+      send:
+        description: "Send emails? (unticked = drafts only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write             # needed to save out/sent_log.csv back to the repo
+
+concurrency: job-agent        # never run two copies at once
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prepare resume
+        env:
+          RESUME_PDF_B64: ${{ secrets.RESUME_PDF_B64 }}
+        run: |
+          if [ -n "$RESUME_PDF_B64" ]; then
+            echo "$RESUME_PDF_B64" | base64 -d > resume.pdf
+          fi
+          if [ ! -f resume.pdf ]; then
+            echo "::error::No resume found. Add the RESUME_PDF_B64 secret or upload resume.pdf to the repo."
+            exit 1
+          fi
+
+      - name: Run agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5-5' }}
+          YOUR_NAME: ${{ vars.YOUR_NAME }}
+          GREENHOUSE: ${{ vars.GREENHOUSE }}
+          LEVER: ${{ vars.LEVER }}
+          KEYWORDS: ${{ vars.KEYWORDS }}
+          MIN_SCORE: ${{ vars.MIN_SCORE || '70' }}
+          MAX_SEND: ${{ vars.MAX_SEND || '10' }}
+          SEND_EMAILS: ${{ vars.SEND_EMAILS }}
+          SEND_INPUT: ${{ inputs.send }}
+        run: |
+          if [ -z "$YOUR_NAME" ]; then
+            echo "::error::Set the YOUR_NAME repository variable."
+            exit 1
+          fi
+          args=(--resume resume.pdf --name "$YOUR_NAME" --jd-dir jds
+                --min-score "$MIN_SCORE" --max-send "$MAX_SEND")
+          if [ -n "$GREENHOUSE" ]; then args+=(--greenhouse $GREENHOUSE); fi
+          if [ -n "$LEVER" ]; then args+=(--lever $LEVER); fi
+          if [ -n "$KEYWORDS" ]; then args+=(--keywords $KEYWORDS); fi
+          if [ "$SEND_INPUT" = "true" ] || [ "$SEND_EMAILS" = "true" ]; then
+            echo "Mode: SENDING emails"
+            args+=(--send)
+          else
+            echo "Mode: drafts only"
+          fi
+          python job_agent.py "${args[@]}"
+
+      - name: Upload drafts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drafts
+          path: out/drafts.csv
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Save run history
+        if: always()
+        run: |
+          rm -f resume.pdf
+          if [ -f out/sent_log.csv ]; then
+            git config user.name "job-agent-bot"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -f out/sent_log.csv
+            git commit -m "Update sent log [skip ci]" || exit 0
+            git push
+          fi
