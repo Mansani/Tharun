@@ -18,7 +18,7 @@ concurrency: job-agent        # never run two copies at once
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -44,16 +44,20 @@ jobs:
 
       - name: Run agent
         env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'groq' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5-5' }}
           YOUR_NAME: ${{ vars.YOUR_NAME }}
           GREENHOUSE: ${{ vars.GREENHOUSE }}
           LEVER: ${{ vars.LEVER }}
           KEYWORDS: ${{ vars.KEYWORDS }}
           MIN_SCORE: ${{ vars.MIN_SCORE || '70' }}
           MAX_SEND: ${{ vars.MAX_SEND || '10' }}
+          MAX_JOBS: ${{ vars.MAX_JOBS || '30' }}
           SEND_EMAILS: ${{ vars.SEND_EMAILS }}
           SEND_INPUT: ${{ inputs.send }}
         run: |
@@ -62,7 +66,7 @@ jobs:
             exit 1
           fi
           args=(--resume resume.pdf --name "$YOUR_NAME" --jd-dir jds
-                --min-score "$MIN_SCORE" --max-send "$MAX_SEND")
+                --min-score "$MIN_SCORE" --max-send "$MAX_SEND" --max-jobs "$MAX_JOBS")
           if [ -n "$GREENHOUSE" ]; then args+=(--greenhouse $GREENHOUSE); fi
           if [ -n "$LEVER" ]; then args+=(--lever $LEVER); fi
           if [ -n "$KEYWORDS" ]; then args+=(--keywords $KEYWORDS); fi
