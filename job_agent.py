@@ -2,13 +2,15 @@
 """
 Job-application cold-email agent.
 
-Pipeline:  collect jobs  ->  extract recruiter email + job ID  ->  Claude scores fit
+Pipeline:  collect jobs  ->  extract recruiter email + job ID  ->  the AI scores fit
            against your resume and writes a tailored email  ->  save drafts (default)
            or send with your resume attached (--send, rate-limited, de-duplicated).
 
 Job sources:
   * a folder of JD files (.pdf / .txt) - e.g. JDs saved from LinkedIn, Naukri, emails, PDFs
   * Greenhouse and Lever public job-board APIs (legal, no scraping needed)
+
+AI provider: free Groq by default (set LLM_PROVIDER=gemini or claude to switch).
 """
 import argparse
 import csv
@@ -22,13 +24,20 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 
-import anthropic
 import requests
 from dotenv import load_dotenv
 from pypdf import PdfReader
 
 load_dotenv()
-MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
+# Which AI writes the emails. "groq" and "gemini" have free tiers; "claude" is paid.
+PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
+PROVIDERS = {
+    "groq": ("https://api.groq.com/openai/v1/chat/completions", "GROQ_API_KEY", "openai/gpt-oss-120b"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "GEMINI_API_KEY", "gemini-2.5-flash"),
+    "claude": (None, "ANTHROPIC_API_KEY", "claude-sonnet-5-5"),
+}
+MODEL = os.getenv("LLM_MODEL") or PROVIDERS[PROVIDER][2]
+CALL_GAP = int(os.getenv("CALL_GAP_SECONDS", "20"))  # pause between AI calls to stay inside free limits
 OUT = Path("out")
 LOG = OUT / "sent_log.csv"  # committed back to the repo by the workflow
 
@@ -133,16 +142,36 @@ JOB DESCRIPTION (source: {source}, url: {url}):
 """
 
 
-def analyse(client, resume: str, job: dict, name: str) -> dict:
+def ask_llm(prompt: str) -> str:
+    url, key_name, _ = PROVIDERS[PROVIDER]
+    key = os.environ.get(key_name)
+    if not key:
+        raise SystemExit(f"Missing {key_name}. Add it as a secret / in .env.")
+    if PROVIDER == "claude":
+        import anthropic
+        msg = anthropic.Anthropic(api_key=key).messages.create(
+            model=MODEL, max_tokens=1200, messages=[{"role": "user", "content": prompt}])
+        return msg.content[0].text
+    for attempt in range(5):
+        r = requests.post(url, timeout=120, headers={"Authorization": f"Bearer {key}"}, json={
+            "model": MODEL, "max_tokens": 1500, "temperature": 0.4,
+            "messages": [{"role": "user", "content": prompt}]})
+        if r.status_code == 429:  # free-tier rate limit: wait and retry
+            wait = int(float(r.headers.get("retry-after", 30))) + 5
+            print(f"    rate limited, waiting {wait}s")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    raise RuntimeError("still rate limited after 5 tries")
+
+
+def analyse(resume: str, job: dict, name: str) -> dict:
     greeting = "Hi " + job["emails"][0].split("@")[0].split(".")[0].title() if job["emails"] else "Hi"
-    msg = client.messages.create(
-        model=MODEL,
-        max_tokens=1200,
-        messages=[{"role": "user", "content": PROMPT.format(
-            greeting=greeting, name=name, resume=resume[:15000],
-            source=job["source"], url=job["url"], jd=job["text"])}],
-    )
-    raw = msg.content[0].text
+    raw = ask_llm(PROMPT.format(
+        greeting=greeting, name=name, resume=resume[:8000],
+        source=job["source"], url=job["url"], jd=job["text"][:6000]))
+    time.sleep(CALL_GAP)
     return json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
 
 
@@ -193,11 +222,12 @@ def main():
     ap.add_argument("--send", action="store_true", help="actually send (default: drafts only)")
     ap.add_argument("--max-send", type=int, default=10, help="max emails per run")
     ap.add_argument("--delay", type=int, default=120, help="seconds between sends")
+    ap.add_argument("--max-jobs", type=int, default=30, help="max new jobs to score per run (protects free AI limits)")
     a = ap.parse_args()
 
     OUT.mkdir(exist_ok=True)
     resume = read_file_text(Path(a.resume))
-    client = anthropic.Anthropic()
+    print(f"AI: {PROVIDER} / {MODEL}")
 
     jobs = jobs_from_folder(a.jd_dir) if a.jd_dir else []
     api_jobs = []
@@ -212,15 +242,21 @@ def main():
     print(f"{len(jobs)} jobs collected")
 
     seen, emailed = load_log()
-    sent = 0
+    sent = scored = 0
     drafts = []
     for job in jobs:
         to = job["emails"][0] if job["emails"] else ""
         # skip jobs already handled; 'ready' ones (good fit, not yet sent) are retried
         if seen.get(job["key"], "ready") != "ready" or (to and to in emailed):
             continue
+        if scored >= a.max_jobs:
+            print(f"  reached --max-jobs {a.max_jobs}; the rest wait for the next run")
+            break
+        scored += 1
         try:
-            r = analyse(client, resume, job, a.name)
+            r = analyse(resume, job, a.name)
+        except SystemExit:
+            raise
         except Exception as e:
             print(f"  skip {job['title']}: {e}")
             continue

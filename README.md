@@ -1,7 +1,7 @@
 # AI Job-Application Cold-Email Agent
 
 Reads your resume, collects job descriptions, pulls out the recruiter email and job ID,
-has Claude score your fit and write a tailored cold email, then saves drafts or sends them
+has a free AI model (Groq) score your fit and write a tailored cold email, then saves drafts or sends them
 with your resume attached. Runs free on GitHub Actions every weekday morning.
 
 ## Files
@@ -31,7 +31,7 @@ Repo → **Settings → Secrets and variables → Actions → Secrets → New re
 
 | Name | Value |
 |---|---|
-| `ANTHROPIC_API_KEY` | your key from console.anthropic.com |
+| `GROQ_API_KEY` | free key from console.groq.com → API Keys (no payment needed) |
 | `SMTP_USER` | your Gmail address |
 | `SMTP_APP_PASSWORD` | a Gmail App Password (Google Account → Security → 2-Step Verification on → App passwords) |
 | `RESUME_PDF_B64` | your resume as text, see below |
@@ -56,10 +56,12 @@ Same page → **Variables** tab → **New repository variable**:
 | `MIN_SCORE` | `75` | optional, default 70 |
 | `MAX_SEND` | `10` | optional, emails per run |
 | `SEND_EMAILS` | `true` | leave unset until drafts look good |
+| `MAX_JOBS` | `30` | optional, new jobs scored per run (keeps you inside the free limit) |
+| `LLM_PROVIDER` | `gemini` | optional; default `groq`. `gemini` needs a `GEMINI_API_KEY` secret from aistudio.google.com; `claude` is paid |
 
 ### 5. Test it
 **Actions** tab → enable workflows if asked → **Job agent** → **Run workflow**.
-When it finishes, open the run and download **drafts** (a CSV of every job with the email Claude wrote).
+When it finishes, open the run and download **drafts** (a CSV of every job with the email the AI wrote).
 
 ### 6. Go live
 Once the drafts read well, add the variable `SEND_EMAILS` = `true`. From then on it runs
@@ -85,6 +87,11 @@ cp .env.example .env        # fill in your values
 python job_agent.py --resume resume.pdf --name "Your Name" --jd-dir jds          # drafts
 python job_agent.py --resume resume.pdf --name "Your Name" --jd-dir jds --send   # send
 ```
+
+## Cost
+Free. GitHub Actions is free for this amount of use, Groq's free plan covers ~30 jobs a day,
+and Gmail sending is free. If you hit Groq's daily limit, the rest of the jobs simply wait
+for the next day's run.
 
 ## Good practice
 - Keep volume low (10–20/day); mass identical emails land in spam and hurt your Gmail reputation.

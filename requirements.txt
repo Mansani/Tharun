@@ -1,4 +1,4 @@
-anthropic
 requests
 pypdf
 python-dotenv
+# anthropic   <- only needed if you switch LLM_PROVIDER to claude (paid)
