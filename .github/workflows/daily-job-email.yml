@@ -1,0 +1,33 @@
+name: Daily 8 PM job email
+
+on:
+  schedule:
+    - cron: "30 14 * * *" # 20:00 Asia/Kolkata
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-8pm-job-email
+  cancel-in-progress: false
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install requests
+      - name: Search jobs and email digest
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          JOB_ALERT_TO: ${{ secrets.JOB_ALERT_TO }}
+          GREENHOUSE: ${{ vars.GREENHOUSE }}
+          LEVER: ${{ vars.LEVER }}
+        run: python job_search/daily_email.py
