@@ -106,7 +106,7 @@ def main():
             parts += [f"{i}. [{j['score']}/100] {j['title']} — {j['company']}",
                       f"   Location: {j['location']} | Source: {j['source']} | Posted: {j['date']}",
                       f"   Matching skills: {j['skills']}",f"   Apply: {j['url']}",""]
-        parts += ["LinkedIn — Hyderabad, posted in last 24 hours:",
+        parts += ["", "More job searches (last 24 hours):", "LinkedIn Hyderabad: https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Hyderabad&f_TPR=r86400", "LinkedIn Remote: https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Remote&f_TPR=r86400", "Indeed Hyderabad: https://in.indeed.com/jobs?q=.NET+C%23+Azure&l=Hyderabad&fromage=1", "Naukri Hyderabad: https://www.naukri.com/dot-net-developer-jobs-in-hyderabad", "", "LinkedIn — Hyderabad, posted in last 24 hours:",
                   "https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Hyderabad&f_TPR=r86400",
                   "LinkedIn — Remote, posted in last 24 hours:",
                   "https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Remote&f_TPR=r86400"]
