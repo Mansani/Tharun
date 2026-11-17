@@ -1,0 +1,28 @@
+{
+  "name": "Tharun Mansani",
+  "location": "Hyderabad, India",
+  "experience_years": 4,
+  "target_roles": ["Software Engineer .NET", ".NET Developer", "C# Developer", "ASP.NET Core Developer", "Backend Engineer .NET", "Software Engineer Azure", ".NET Azure Developer", "Senior Software Engineer .NET"],
+  "locations": ["Hyderabad", "Remote"],
+  "target_salary_lpa": "15-20",
+  "skills": {
+    "core": ["C#", ".NET 10", "ASP.NET Core", "Web API", "EF Core", "LINQ", "ADO.NET", "SQL Server"],
+    "azure": ["Azure Functions", "Azure App Service", "Azure Blob Storage", "Azure AD", "JWT", "Key Vault", "Application Insights"],
+    "architecture": ["REST API Design", "API Architecture", "RBAC", "Claims", "Permission Management", "System Design", "Middleware"],
+    "performance": ["In-memory Caching", "Polly", "API performance"],
+    "testing": ["NUnit"],
+    "other": ["Python", "Cosmos DB", "Azure Data Factory", "React.js beginner"]
+  },
+  "do_not_claim": ["Docker", "Kubernetes", "Redis unless explicitly marked as learning"],
+  "resume_facts": [
+    "Software Engineer at Unvired Software Pvt. Ltd. since Feb 2026",
+    "Software Engineer at IndusInd Bank from Oct 2022 to Feb 2026",
+    "Data Engineer Intern at Celebal Technologies from Jan 2022 to Aug 2022",
+    "Implemented backend APIs and authorization/RBAC capabilities using C#/.NET",
+    "Worked with Azure Functions, Azure App Service, Blob Storage, Azure AD/JWT and SQL Server",
+    "Used NUnit for unit testing",
+    "Implemented in-memory caching in .NET",
+    "Worked on Azure retry functions and Durable Functions",
+    "MBA Data Science from K L University; B.Tech CSE from K L University"
+  ]
+}
