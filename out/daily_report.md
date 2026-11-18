@@ -1,0 +1,1 @@
+# Daily .NET/Azure Job Report\n\nGenerated: 2026-11-18T12:08:39.302593+00:00\n\nMatched jobs: **0**\n\n
