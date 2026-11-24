@@ -3,6 +3,8 @@ import re
 import html
 import smtplib
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+import xml.etree.ElementTree as ET
 from email.message import EmailMessage
 from urllib.parse import quote_plus, urlsplit
 import requests
@@ -62,7 +64,10 @@ def parse_date(value):
                 stamp /= 1000.0
             return datetime.fromtimestamp(stamp, tz=UTC)
         raw = str(value).strip().replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(raw)
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            parsed = parsedate_to_datetime(str(value))
         return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     except (ValueError, TypeError, OverflowError, OSError):
         return None
@@ -77,13 +82,23 @@ def fetch_json(url, params=None, headers=None, method="GET", payload=None, timeo
     return response.json()
 
 
-def location_allowed(location):
+def location_allowed(location, description=""):
     loc = (location or "").lower()
-    if not loc:
+    combined = loc + " " + (description or "").lower()
+    # Missing location is retained but visibly marked for manual verification.
+    if not loc.strip() or loc.strip() == "not specified":
         return True
-    return any(token in loc for token in (
-        "hyderabad", "india", "remote", "anywhere", "worldwide", "global", "asia"
-    ))
+    wanted = ("hyderabad", "india", "remote", "anywhere", "worldwide", "global")
+    if any(token in combined for token in wanted):
+        # Exclude explicitly country-restricted remote roles outside India.
+        foreign_restrictions = (
+            "united states only", "us only", "usa only", "canada only",
+            "uk only", "united kingdom only", "europe only", "australia only"
+        )
+        if "remote" in combined and any(x in combined for x in foreign_restrictions) and "india" not in combined:
+            return False
+        return True
+    return False
 
 
 def add_job(rows, source, title, company, location, url, description="", posted_date=None,
@@ -106,9 +121,10 @@ def add_job(rows, source, title, company, location, url, description="", posted_
     if re.search(r"\b(intern|internship|fresher|trainee|graduate trainee)\b", title, re.I):
         return
 
-    location = clean_text(location) or "Not specified"
-    if not location_allowed(location):
+    raw_location = clean_text(location)
+    if not location_allowed(raw_location, description):
         return
+    location = raw_location or "Not specified — verify eligibility
 
     posted = parse_date(posted_date)
     if posted and posted < CUTOFF:
@@ -184,6 +200,18 @@ def collect_jobicy(rows):
         add_job(rows, "Jobicy", job.get("jobTitle"), job.get("companyName"),
                 job.get("jobGeo"), job.get("url"), job.get("jobDescription"),
                 job.get("pubDate"), job.get("annualSalary") or job.get("salary"))
+
+
+def collect_weworkremotely(rows):
+    # WWR explicitly publishes this public RSS feed for reuse with source attribution.
+    response = SESSION.get("https://weworkremotely.com/categories/remote-programming-jobs.rss",
+                           timeout=30)
+    response.raise_for_status()
+    root = ET.fromstring(response.content)
+    for item in root.findall(".//item"):
+        add_job(rows, "We Work Remotely", item.findtext("title"), "",
+                "Remote — country eligibility verify", item.findtext("link"),
+                item.findtext("description"), item.findtext("pubDate"))
 
 
 def collect_greenhouse(rows):
@@ -337,6 +365,7 @@ def collect():
         ("Remote OK", lambda: collect_remoteok(rows)),
         ("Arbeitnow", lambda: collect_arbeitnow(rows)),
         ("Jobicy", lambda: collect_jobicy(rows)),
+        ("We Work Remotely", lambda: collect_weworkremotely(rows)),
         ("Greenhouse", lambda: collect_greenhouse(rows)),
         ("Lever", lambda: collect_lever(rows)),
         ("Ashby", lambda: collect_ashby(rows)),
