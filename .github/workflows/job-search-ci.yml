@@ -1,0 +1,31 @@
+name: Job search code validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "job_search/**"
+      - ".github/workflows/daily-job-email.yml"
+      - ".github/workflows/job-search-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "job_search/**"
+      - ".github/workflows/daily-job-email.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate Python syntax
+        run: python -m py_compile job_search/daily_email.py job_search/agent.py
+      - name: Validate profile JSON
+        run: python -m json.tool job_search/profile.json > /dev/null
