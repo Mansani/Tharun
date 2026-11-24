@@ -338,10 +338,11 @@ def collect_jooble(rows):
 
 
 BRAVE_QUERIES = [
-    '(".NET Developer" OR "C# Developer" OR "ASP.NET Core") Hyderabad India jobs',
-    '(".NET" OR "C#" OR "ASP.NET Core") Azure backend remote India jobs',
-    'site:linkedin.com/jobs/view OR site:naukri.com OR site:in.indeed.com .NET C# developer Hyderabad',
-    'site:foundit.in OR site:hirist.tech OR site:cutshort.io OR site:instahyre.com .NET developer India'
+    '(".NET Developer" OR "C# Developer" OR "ASP.NET Core") Hyderabad India jobs -site:linkedin.com -site:indeed.com -site:naukri.com',
+    '(".NET" OR "C#" OR "ASP.NET Core") Azure backend remote India jobs -site:linkedin.com -site:indeed.com -site:naukri.com',
+    '"Senior Software Engineer" .NET C# Azure Hyderabad 3 years OR 4 years OR 5 years jobs -site:linkedin.com -site:indeed.com -site:naukri.com',
+    'site:greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com ".NET" Azure India Hyderabad',
+    'site:foundit.in OR site:hirist.tech OR site:cutshort.io OR site:instahyre.com .NET developer Hyderabad India'
 ]
 
 
