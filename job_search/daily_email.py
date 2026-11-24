@@ -173,7 +173,7 @@ def safe_error(exc):
         secret = os.getenv(name)
         if secret:
             message = message.replace(secret, "[redacted]")
-    message = re.sub(r"(?i)(app_id|app_key|api_key|key)=([^&\\s]+)", r"\\1=[redacted]", message)
+    message = re.sub(r"(?i)(app_id|app_key|api_key|key)=([^&\s]+)", r"\1=[redacted]", message)
     return message[:180]
 
 
