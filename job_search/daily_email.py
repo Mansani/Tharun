@@ -22,7 +22,9 @@ CORE_TERMS = [".net", "dotnet", "c#", "c sharp", "csharp", "asp.net", "aspnet"]
 ROLE_TERMS = [
     "software engineer", "software developer", ".net developer", "dotnet developer",
     "c# developer", "backend engineer", "backend developer", "asp.net developer",
-    "api developer", "application developer"
+    "api developer", "application developer", "full stack developer",
+    "full-stack developer", "developer", "engineer", "programmer",
+    "technical lead", "solution architect"
 ]
 SKILLS = [
     "c#", ".net", "asp.net core", "web api", "ef core", "entity framework",
@@ -116,6 +118,8 @@ def add_job(rows, source, title, company, location, url, description="", posted_
         any(term in combined for term in ("backend", "back-end", "web api", "rest api", "software engineer"))
     )
     if not (has_core_stack or has_backend_azure):
+        return
+    if not any(term in combined for term in ROLE_TERMS):
         return
 
     if re.search(r"\b(intern|internship|fresher|trainee|graduate trainee)\b", title, re.I):
