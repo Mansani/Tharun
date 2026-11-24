@@ -124,7 +124,7 @@ def add_job(rows, source, title, company, location, url, description="", posted_
     raw_location = clean_text(location)
     if not location_allowed(raw_location, description):
         return
-    location = raw_location or "Not specified — verify eligibility
+    location = raw_location or "Not specified — verify eligibility"
 
     posted = parse_date(posted_date)
     if posted and posted < CUTOFF:
