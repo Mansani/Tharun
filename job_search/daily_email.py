@@ -173,7 +173,7 @@ def add_job(rows, source, title, company, location, url, description="", posted_
 
 def safe_error(exc):
     message = str(exc)
-    for name in ("JOOBLE_API_KEY", "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "BRAVE_SEARCH_API_KEY"):
+    for name in ():
         secret = os.getenv(name)
         if secret:
             message = message.replace(secret, "[redacted]")
@@ -298,80 +298,6 @@ def collect_smartrecruiters(rows):
                     job.get("releasedDate") or job.get("postedDate"))
 
 
-def collect_adzuna(rows):
-    app_id = os.getenv("ADZUNA_APP_ID")
-    app_key = os.getenv("ADZUNA_APP_KEY")
-    if not (app_id and app_key):
-        return "not configured"
-    for page in (1, 2):
-        data = fetch_json(
-            f"https://api.adzuna.com/v1/api/jobs/in/search/{page}",
-            params={
-                "app_id": app_id, "app_key": app_key, "results_per_page": 50,
-                "what": '"C#" .NET ASP.NET Core Azure developer',
-                "where": "Hyderabad", "max_days_old": 1, "sort_by": "date",
-                "sort_dir": "down", "content-type": "application/json"
-            }
-        )
-        for job in data.get("results", []):
-            company = (job.get("company") or {}).get("display_name")
-            location = (job.get("location") or {}).get("display_name")
-            salary = None
-            if job.get("salary_min") or job.get("salary_max"):
-                salary = f"INR {job.get('salary_min', '?')} - {job.get('salary_max', '?')} per year"
-            add_job(rows, "Adzuna", job.get("title"), company, location,
-                    job.get("redirect_url"), job.get("description"), job.get("created"), salary)
-
-
-def collect_jooble(rows):
-    api_key = os.getenv("JOOBLE_API_KEY")
-    if not api_key:
-        return "not configured"
-    for location in ("Hyderabad", "India Remote"):
-        data = fetch_json(
-            f"{os.getenv('JOOBLE_API_BASE_URL', 'https://in.jooble.org/api').rstrip('/')}/{api_key}", method="POST",
-            payload={
-                "keywords": ".NET C# ASP.NET Core Azure backend developer",
-                "location": location, "page": 1, "ResultOnPage": 50
-            }
-        )
-        for job in data.get("jobs", []):
-            add_job(rows, "Jooble", job.get("title"), job.get("company"),
-                    job.get("location"), job.get("link"), job.get("snippet"),
-                    job.get("updated") or job.get("updatedAt"), job.get("salary"))
-
-
-BRAVE_QUERIES = [
-    '(".NET Developer" OR "C# Developer" OR "ASP.NET Core") Hyderabad India jobs -site:linkedin.com -site:indeed.com -site:naukri.com',
-    '(".NET" OR "C#" OR "ASP.NET Core") Azure backend remote India jobs -site:linkedin.com -site:indeed.com -site:naukri.com',
-    '"Senior Software Engineer" .NET C# Azure Hyderabad 3 years OR 4 years OR 5 years jobs -site:linkedin.com -site:indeed.com -site:naukri.com',
-    'site:greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com ".NET" Azure India Hyderabad',
-    'site:foundit.in OR site:hirist.tech OR site:cutshort.io OR site:instahyre.com .NET developer Hyderabad India'
-]
-
-
-def collect_brave_search(rows):
-    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
-    if not api_key:
-        return "not configured"
-    headers = {"X-Subscription-Token": api_key, "Accept": "application/json"}
-    for query in BRAVE_QUERIES:
-        data = fetch_json(
-            "https://api.search.brave.com/res/v1/web/search",
-            params={"q": query, "freshness": "pd", "country": "IN",
-                    "search_lang": "en", "count": 20},
-            headers=headers
-        )
-        for result in (data.get("web") or {}).get("results", []):
-            title = result.get("title")
-            url = result.get("url")
-            description = result.get("description", "")
-            source = "Web Search (" + portal_company(url) + ")"
-            add_job(rows, source, title, portal_company(url), "",
-                    url, description, result.get("page_age"),
-                    indexed_freshness=True)
-
-
 def collect():
     rows = []
     statuses = {}
@@ -384,10 +310,7 @@ def collect():
         ("Greenhouse", lambda: collect_greenhouse(rows)),
         ("Lever", lambda: collect_lever(rows)),
         ("Ashby", lambda: collect_ashby(rows)),
-        ("SmartRecruiters", lambda: collect_smartrecruiters(rows)),
-        ("Adzuna", lambda: collect_adzuna(rows)),
-        ("Jooble", lambda: collect_jooble(rows)),
-        ("Brave web search", lambda: collect_brave_search(rows))
+        ("SmartRecruiters", lambda: collect_smartrecruiters(rows))
     ]
 
     for name, collector in collectors:
