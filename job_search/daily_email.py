@@ -1,119 +1,491 @@
-import os, re, smtplib, html
+import os
+import re
+import html
+import smtplib
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from urllib.parse import quote
+from urllib.parse import quote_plus, urlsplit
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-NOW=datetime.now(timezone.utc)
-CUTOFF=NOW-timedelta(hours=24)
-TERMS=[".net","dotnet","c#","c sharp","asp.net","asp.net core","azure","backend engineer","software engineer"]
-LOCATIONS=["hyderabad","remote","india"]
-SKILLS=["c#",".net","asp.net core","web api","ef core","sql server","azure functions","azure app service","azure","jwt","rbac","nunit","in-memory caching","polly","blob storage"]
-S=requests.Session()
-S.headers.update({"User-Agent":"TharunDailyJobDigest/1.0 (personal job search; contact: configured mailbox)"})
+UTC = timezone.utc
+IST = timezone(timedelta(hours=5, minutes=30))
+NOW = datetime.now(UTC)
+CUTOFF = NOW - timedelta(hours=24)
+MAX_DATED = 35
+MAX_UNDATED = 12
+
+CORE_TERMS = [".net", "dotnet", "c#", "c sharp", "csharp", "asp.net", "aspnet"]
+ROLE_TERMS = [
+    "software engineer", "software developer", ".net developer", "dotnet developer",
+    "c# developer", "backend engineer", "backend developer", "asp.net developer",
+    "api developer", "application developer"
+]
+SKILLS = [
+    "c#", ".net", "asp.net core", "web api", "ef core", "entity framework",
+    "sql server", "azure functions", "azure app service", "azure blob storage",
+    "azure", "azure ad", "jwt", "rbac", "key vault", "application insights",
+    "nunit", "in-memory caching", "polly", "cosmos db", "azure data factory",
+    "rest api", "microservices", "linq", "ado.net", "system design"
+]
+TARGET_TITLE_TERMS = [
+    ".net developer", "dotnet developer", "c# developer", "asp.net core developer",
+    "backend engineer", "backend developer", "software engineer", "software developer"
+]
+
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "TharunPersonalJobSearch/2.0 (daily job discovery; respectful API use)"
+})
+retry = Retry(
+    total=2, connect=2, read=2, backoff_factor=0.5,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(["GET", "POST"])
+)
+SESSION.mount("https://", HTTPAdapter(max_retries=retry))
+
+
+def clean_text(value):
+    value = html.unescape(str(value or ""))
+    value = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
 
 def parse_date(value):
-    if not value: return None
+    if value is None or value == "":
+        return None
     try:
-        if isinstance(value,(int,float)):
-            return datetime.fromtimestamp(value/1000 if value>10**12 else value,tz=timezone.utc)
-        d=datetime.fromisoformat(str(value).replace("Z","+00:00"))
-        return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
-    except Exception: return None
+        if isinstance(value, (int, float)) or str(value).strip().isdigit():
+            stamp = float(value)
+            if stamp > 10**12:
+                stamp /= 1000.0
+            return datetime.fromtimestamp(stamp, tz=UTC)
+        raw = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(raw)
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
 
-def add(rows,source,title,company,location,url,description,date):
-    if not title or not url: return
-    dt=parse_date(date)
-    if dt and dt<CUTOFF: return
-    text=(title+" "+description).lower()
-    if not any(t in text for t in TERMS): return
-    loc=(location or "").lower()
-    if loc and not any(x in loc for x in LOCATIONS): return
-    hits=sorted({x for x in SKILLS if x in text})
-    score=min(100, min(55,len(hits)*7)+25+ (20 if "hyderabad" in loc or "remote" in loc else 0))
-    rows.append({"score":score,"source":source,"title":title,"company":company or "Not specified",
-                 "location":location or "Not specified","url":url,"date":dt.isoformat() if dt else "Date not provided",
-                 "skills":", ".join(hits[:10]),"description":re.sub(r"\\s+"," ",description)[:500]})
 
-def fetch_json(url):
-    r=S.get(url,timeout=35); r.raise_for_status(); return r.json()
+def fetch_json(url, params=None, headers=None, method="GET", payload=None, timeout=30):
+    if method == "POST":
+        response = SESSION.post(url, json=payload, params=params, headers=headers, timeout=timeout)
+    else:
+        response = SESSION.get(url, params=params, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def location_allowed(location):
+    loc = (location or "").lower()
+    if not loc:
+        return True
+    return any(token in loc for token in (
+        "hyderabad", "india", "remote", "anywhere", "worldwide", "global", "asia"
+    ))
+
+
+def add_job(rows, source, title, company, location, url, description="", posted_date=None,
+            salary=None, indexed_freshness=False):
+    title = clean_text(title)
+    description = clean_text(description)
+    url = str(url or "").strip()
+    if not title or not url or not url.startswith(("http://", "https://")):
+        return
+
+    combined = (title + " " + description).lower()
+    has_core_stack = any(term in combined for term in CORE_TERMS)
+    has_backend_azure = (
+        "azure" in combined and
+        any(term in combined for term in ("backend", "back-end", "web api", "rest api", "software engineer"))
+    )
+    if not (has_core_stack or has_backend_azure):
+        return
+
+    if re.search(r"\b(intern|internship|fresher|trainee|graduate trainee)\b", title, re.I):
+        return
+
+    location = clean_text(location) or "Not specified"
+    if not location_allowed(location):
+        return
+
+    posted = parse_date(posted_date)
+    if posted and posted < CUTOFF:
+        return
+
+    skill_hits = sorted({skill for skill in SKILLS if skill in combined})
+    title_lower = title.lower()
+    title_hits = [term for term in TARGET_TITLE_TERMS if term in title_lower]
+
+    score = 25
+    score += min(45, len(skill_hits) * 5)
+    score += 18 if any(term in title_lower for term in TARGET_TITLE_TERMS[:5]) else (10 if title_hits else 0)
+    loc = location.lower()
+    score += 15 if "hyderabad" in loc else (12 if "remote" in loc else (8 if "india" in loc else 0))
+    if posted:
+        score += 10
+    if re.search(r"\b(3|4|5)\s*(\+|to|-)?\s*(years|yrs)\b", combined):
+        score += 5
+    score = min(100, score)
+
+    if posted:
+        posted_label = posted.astimezone(IST).strftime("%d %b %Y, %I:%M %p IST")
+    elif indexed_freshness:
+        posted_label = "Search index filtered to past 24h; verify original posting date"
+    else:
+        posted_label = "Posting date not provided; verify before applying"
+
+    rows.append({
+        "score": score,
+        "source": source,
+        "title": title,
+        "company": clean_text(company) or "Not identified",
+        "location": location,
+        "url": url,
+        "posted_dt": posted.isoformat() if posted else "",
+        "posted_label": posted_label,
+        "skills": ", ".join(skill_hits[:12]) or "Relevant .NET/Azure terms found",
+        "salary": clean_text(salary) or "Not disclosed",
+        "description": description[:650]
+    })
+
+
+def portal_company(url):
+    try:
+        host = urlsplit(url).netloc.lower().removeprefix("www.")
+        return host or "Search result"
+    except Exception:
+        return "Search result"
+
+
+def collect_remoteok(rows):
+    data = fetch_json("https://remoteok.com/api")
+    for job in data:
+        if not isinstance(job, dict) or not job.get("position"):
+            continue
+        add_job(rows, "Remote OK", job.get("position"), job.get("company"),
+                job.get("location"), job.get("url") or job.get("apply_url"),
+                job.get("description"), job.get("date") or job.get("epoch"),
+                job.get("salary"))
+
+
+def collect_arbeitnow(rows):
+    data = fetch_json("https://www.arbeitnow.com/api/job-board-api")
+    for job in data.get("data", []):
+        add_job(rows, "Arbeitnow", job.get("title"), job.get("company_name"),
+                job.get("location"), job.get("url"), job.get("description"),
+                job.get("created_at"), job.get("salary"))
+
+
+def collect_jobicy(rows):
+    data = fetch_json("https://jobicy.com/api/v2/remote-jobs", params={"count": 50})
+    for job in data.get("jobs", []):
+        add_job(rows, "Jobicy", job.get("jobTitle"), job.get("companyName"),
+                job.get("jobGeo"), job.get("url"), job.get("jobDescription"),
+                job.get("pubDate"), job.get("annualSalary") or job.get("salary"))
+
+
+def collect_greenhouse(rows):
+    slugs = os.getenv("GREENHOUSE", "").split()
+    if not slugs:
+        return "not configured"
+    for slug in slugs:
+        data = fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
+                          params={"content": "true"})
+        for job in data.get("jobs", []):
+            add_job(rows, "Greenhouse", job.get("title"), slug,
+                    (job.get("location") or {}).get("name"), job.get("absolute_url"),
+                    job.get("content"), job.get("updated_at"))
+
+
+def collect_lever(rows):
+    slugs = os.getenv("LEVER", "").split()
+    if not slugs:
+        return "not configured"
+    for slug in slugs:
+        data = fetch_json(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"})
+        for job in data:
+            categories = job.get("categories") or {}
+            loc = categories.get("location") or ", ".join(categories.get("allLocations") or [])
+            add_job(rows, "Lever", job.get("text"), slug, loc, job.get("hostedUrl"),
+                    job.get("descriptionPlain"), job.get("createdAt"), job.get("salaryRange"))
+
+
+def collect_ashby(rows):
+    boards = os.getenv("ASHBY", "").split()
+    if not boards:
+        return "not configured"
+    for board in boards:
+        data = fetch_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}",
+                          params={"includeCompensation": "true"})
+        for job in data.get("jobs", []):
+            locations = [job.get("location", "")]
+            locations += [x.get("location", "") for x in job.get("secondaryLocations", [])]
+            if job.get("isRemote"):
+                locations.append("Remote")
+            compensation = job.get("compensation") or {}
+            salary = compensation.get("scrapeableCompensationSalarySummary") or compensation.get("compensationTierSummary")
+            add_job(rows, "Ashby", job.get("title"), board, " / ".join(filter(None, locations)),
+                    job.get("applyUrl") or job.get("jobUrl"),
+                    job.get("descriptionPlain") or job.get("descriptionHtml"),
+                    job.get("publishedAt"), salary)
+
+
+def collect_smartrecruiters(rows):
+    companies = os.getenv("SMARTRECRUITERS", "").split()
+    if not companies:
+        return "not configured"
+    for company_id in companies:
+        data = fetch_json(
+            f"https://api.smartrecruiters.com/v1/companies/{company_id}/postings",
+            params={"limit": 100, "offset": 0, "country": "IN", "destination": "PUBLIC"}
+        )
+        postings = data.get("content") or data.get("results") or data.get("postings") or []
+        for job in postings:
+            loc = job.get("location") or {}
+            location = ", ".join(filter(None, [
+                loc.get("city"), loc.get("region"), loc.get("country")
+            ])) if isinstance(loc, dict) else str(loc)
+            refs = job.get("ref") or {}
+            url = job.get("applyUrl") or refs.get("jobAd") or refs.get("jobAdUrl")
+            if not url and job.get("id"):
+                url = f"https://careers.smartrecruiters.com/{company_id}/{job['id']}"
+            add_job(rows, "SmartRecruiters", job.get("name") or job.get("title"),
+                    company_id, location, url, job.get("jobAd") or job.get("description"),
+                    job.get("releasedDate") or job.get("postedDate"))
+
+
+def collect_adzuna(rows):
+    app_id = os.getenv("ADZUNA_APP_ID")
+    app_key = os.getenv("ADZUNA_APP_KEY")
+    if not (app_id and app_key):
+        return "not configured"
+    for page in (1, 2):
+        data = fetch_json(
+            f"https://api.adzuna.com/v1/api/jobs/in/search/{page}",
+            params={
+                "app_id": app_id, "app_key": app_key, "results_per_page": 50,
+                "what": '"C#" .NET ASP.NET Core Azure developer',
+                "where": "Hyderabad", "max_days_old": 1, "sort_by": "date",
+                "sort_dir": "down", "content-type": "application/json"
+            }
+        )
+        for job in data.get("results", []):
+            company = (job.get("company") or {}).get("display_name")
+            location = (job.get("location") or {}).get("display_name")
+            salary = None
+            if job.get("salary_min") or job.get("salary_max"):
+                salary = f"INR {job.get('salary_min', '?')} - {job.get('salary_max', '?')} per year"
+            add_job(rows, "Adzuna", job.get("title"), company, location,
+                    job.get("redirect_url"), job.get("description"), job.get("created"), salary)
+
+
+def collect_jooble(rows):
+    api_key = os.getenv("JOOBLE_API_KEY")
+    if not api_key:
+        return "not configured"
+    for location in ("Hyderabad", "India Remote"):
+        data = fetch_json(
+            f"https://jooble.org/api/{api_key}", method="POST",
+            payload={
+                "keywords": ".NET C# ASP.NET Core Azure backend developer",
+                "location": location, "page": 1, "ResultOnPage": 50
+            }
+        )
+        for job in data.get("jobs", []):
+            add_job(rows, "Jooble", job.get("title"), job.get("company"),
+                    job.get("location"), job.get("link"), job.get("snippet"),
+                    job.get("updated") or job.get("updatedAt"), job.get("salary"))
+
+
+BRAVE_QUERIES = [
+    '(".NET Developer" OR "C# Developer" OR "ASP.NET Core") Hyderabad India jobs',
+    '(".NET" OR "C#" OR "ASP.NET Core") Azure backend remote India jobs',
+    'site:linkedin.com/jobs/view OR site:naukri.com OR site:in.indeed.com .NET C# developer Hyderabad',
+    'site:foundit.in OR site:hirist.tech OR site:cutshort.io OR site:instahyre.com .NET developer India'
+]
+
+
+def collect_brave_search(rows):
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+    if not api_key:
+        return "not configured"
+    headers = {"X-Subscription-Token": api_key, "Accept": "application/json"}
+    for query in BRAVE_QUERIES:
+        data = fetch_json(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "freshness": "pd", "country": "IN",
+                    "search_lang": "en", "count": 20},
+            headers=headers
+        )
+        for result in (data.get("web") or {}).get("results", []):
+            title = result.get("title")
+            url = result.get("url")
+            description = result.get("description", "")
+            source = "Web Search (" + portal_company(url) + ")"
+            add_job(rows, source, title, portal_company(url), "",
+                    url, description, result.get("page_age"),
+                    indexed_freshness=True)
+
 
 def collect():
-    rows=[]
-    # RemoteOK public feed. Respect source attribution and link to canonical listing.
-    try:
-        data=fetch_json("https://remoteok.com/api")
-        for j in data:
-            if not isinstance(j,dict) or not j.get("position"): continue
-            add(rows,"Remote OK",j.get("position"),j.get("company"),j.get("location"),
-                j.get("url") or j.get("apply_url"),j.get("description",""),
-                j.get("date") or j.get("epoch"))
-    except Exception as e: print("Remote OK feed:",e)
+    rows = []
+    statuses = {}
 
-    # Arbeitnow public job-board API.
-    try:
-        data=fetch_json("https://www.arbeitnow.com/api/job-board-api")
-        for j in data.get("data",[]):
-            add(rows,"Arbeitnow",j.get("title"),j.get("company_name"),j.get("location"),
-                j.get("url"),j.get("description",""),j.get("created_at"))
-    except Exception as e: print("Arbeitnow feed:",e)
+    collectors = [
+        ("Remote OK", lambda: collect_remoteok(rows)),
+        ("Arbeitnow", lambda: collect_arbeitnow(rows)),
+        ("Jobicy", lambda: collect_jobicy(rows)),
+        ("Greenhouse", lambda: collect_greenhouse(rows)),
+        ("Lever", lambda: collect_lever(rows)),
+        ("Ashby", lambda: collect_ashby(rows)),
+        ("SmartRecruiters", lambda: collect_smartrecruiters(rows)),
+        ("Adzuna", lambda: collect_adzuna(rows)),
+        ("Jooble", lambda: collect_jooble(rows)),
+        ("Brave web search", lambda: collect_brave_search(rows))
+    ]
 
-    # Jobicy remote job feed.
-    try:
-        data=fetch_json("https://jobicy.com/api/v2/remote-jobs?count=50")
-        for j in data.get("jobs",[]):
-            add(rows,"Jobicy",j.get("jobTitle"),j.get("companyName"),j.get("jobGeo"),
-                j.get("url"),j.get("jobDescription",""),j.get("pubDate"))
-    except Exception as e: print("Jobicy feed:",e)
-
-    # Company career sites with public ATS APIs. Supply known board/company slugs as GitHub variables.
-    for slug in os.getenv("GREENHOUSE","").split():
+    for name, collector in collectors:
+        before = len(rows)
         try:
-            data=fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
-            for j in data.get("jobs",[]):
-                add(rows,"Greenhouse",j.get("title"),slug,j.get("location",{}).get("name"),
-                    j.get("absolute_url"),j.get("content",""),j.get("updated_at"))
-        except Exception as e: print("Greenhouse",slug,e)
-    for slug in os.getenv("LEVER","").split():
-        try:
-            data=fetch_json(f"https://api.lever.co/v0/postings/{slug}?mode=json")
-            for j in data:
-                c=j.get("categories",{})
-                add(rows,"Lever",j.get("text"),slug,c.get("location") or ", ".join(c.get("allLocations",[])),
-                    j.get("hostedUrl"),j.get("descriptionPlain",""),j.get("createdAt"))
-        except Exception as e: print("Lever",slug,e)
+            result = collector()
+            if result == "not configured":
+                statuses[name] = "Not configured (optional)"
+            else:
+                statuses[name] = f"OK — {len(rows) - before} relevant jobs"
+        except Exception as exc:
+            statuses[name] = f"FAILED — {type(exc).__name__}: {str(exc)[:180]}"
+            print(f"[{name}] {statuses[name]}")
 
-    # Remove duplicates by canonical URL and sort highest match first.
-    unique={}
-    for j in rows: unique[j["url"]]=j
-    return sorted(unique.values(),key=lambda x:(-x["score"],x["title"].lower()))[:40]
+    # De-duplicate identical application pages while keeping the strongest listing.
+    unique = {}
+    for job in rows:
+        key = job["url"].split("#", 1)[0].rstrip("/")
+        if key not in unique or job["score"] > unique[key]["score"]:
+            unique[key] = job
+    jobs = list(unique.values())
+    jobs.sort(key=lambda j: (
+        0 if j["posted_dt"] else 1,
+        -j["score"],
+        j["posted_dt"] or ""
+    ), reverse=False)
+    return jobs, statuses
+
+
+def search_links():
+    query = quote_plus('(".NET Developer" OR "C# Developer" OR "ASP.NET Core")')
+    google_query = quote_plus('(".NET Developer" OR "C# Developer" OR "ASP.NET Core") Hyderabad India jobs')
+    site_query = quote_plus('site:foundit.in OR site:hirist.tech OR site:cutshort.io OR site:instahyre.com .NET developer India')
+    return [
+        ("LinkedIn Hyderabad — last 24 hours",
+         "https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Hyderabad&f_TPR=r86400"),
+        ("LinkedIn Remote — last 24 hours",
+         "https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=India&f_TPR=r86400"),
+        ("Naukri — .NET Hyderabad",
+         "https://www.naukri.com/dot-net-developer-jobs-in-hyderabad"),
+        ("Indeed — Hyderabad, last 24 hours",
+         "https://in.indeed.com/jobs?q=.NET+C%23+Azure&l=Hyderabad&fromage=1"),
+        ("Google Jobs — .NET / C# Hyderabad",
+         "https://www.google.com/search?q=" + google_query + "&udm=8"),
+        ("Foundit / Hirist / Cutshort / Instahyre search",
+         "https://www.google.com/search?q=" + site_query),
+        ("Company career pages — .NET / Azure Hyderabad",
+         "https://www.google.com/search?q=" + quote_plus('".NET" Azure developer Hyderabad careers jobs'))
+    ]
+
 
 def main():
-    jobs=collect()
-    recipient=os.environ.get("JOB_ALERT_TO") or os.environ.get("SMTP_USER")
-    sender=os.environ.get("SMTP_USER")
-    password=os.environ.get("SMTP_APP_PASSWORD")
-    if not recipient or not sender or not password:
-        raise SystemExit("Missing JOB_ALERT_TO (optional), SMTP_USER, or SMTP_APP_PASSWORD GitHub secret.")
-    msg=EmailMessage()
-    msg["Subject"]=f"Daily .NET/Azure job matches — {NOW.astimezone(timezone(timedelta(hours=5,minutes=30))).strftime('%d %b %Y')} ({len(jobs)} matches)"
-    msg["From"]=sender; msg["To"]=recipient
-    if not jobs:
-        body="No matching jobs with a verifiable last-24-hour posting date were found today. Search again tomorrow. LinkedIn search (last 24 hours): https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Hyderabad&f_TPR=r86400"
-    else:
-        parts=[f"Daily .NET / C# / Azure job digest — {len(jobs)} matches found.", "Profile: ~4 years, Hyderabad / Remote, target 15–20 LPA.", "Jobs with unknown posting dates may appear; check each listing before applying.", ""]
-        for i,j in enumerate(jobs,1):
-            parts += [f"{i}. [{j['score']}/100] {j['title']} — {j['company']}",
-                      f"   Location: {j['location']} | Source: {j['source']} | Posted: {j['date']}",
-                      f"   Matching skills: {j['skills']}",f"   Apply: {j['url']}",""]
-        parts += ["", "More job searches (last 24 hours):", "LinkedIn Hyderabad: https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Hyderabad&f_TPR=r86400", "LinkedIn Remote: https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Remote&f_TPR=r86400", "Indeed Hyderabad: https://in.indeed.com/jobs?q=.NET+C%23+Azure&l=Hyderabad&fromage=1", "Naukri Hyderabad: https://www.naukri.com/dot-net-developer-jobs-in-hyderabad", "", "LinkedIn — Hyderabad, posted in last 24 hours:",
-                  "https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Hyderabad&f_TPR=r86400",
-                  "LinkedIn — Remote, posted in last 24 hours:",
-                  "https://www.linkedin.com/jobs/search/?keywords=.NET%20C%23%20Azure&location=Remote&f_TPR=r86400"]
-        body="\\n".join(parts)
-    msg.set_content(body)
-    with smtplib.SMTP_SSL(os.getenv("SMTP_HOST","smtp.gmail.com"),int(os.getenv("SMTP_PORT","465"))) as smtp:
-        smtp.login(sender,password); smtp.send_message(msg)
-    print(f"Sent digest to {recipient}; {len(jobs)} matching listings.")
+    jobs, statuses = collect()
+    recent = [j for j in jobs if j["posted_dt"]]
+    undated = [j for j in jobs if not j["posted_dt"]]
+    recent.sort(key=lambda j: (j["score"], j["posted_dt"]), reverse=True)
+    undated.sort(key=lambda j: j["score"], reverse=True)
+    recent = recent[:MAX_DATED]
+    undated = undated[:MAX_UNDATED]
 
-if __name__=="__main__": main()
+    recipient = os.environ.get("JOB_ALERT_TO") or os.environ.get("SMTP_USER")
+    sender = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_APP_PASSWORD")
+    if not recipient or not sender or not password:
+        raise SystemExit("Missing SMTP_USER or SMTP_APP_PASSWORD GitHub secret.")
+
+    local_now = NOW.astimezone(IST)
+    total = len(recent) + len(undated)
+    msg = EmailMessage()
+    msg["Subject"] = (
+        f"Daily .NET/Azure job radar — {local_now.strftime('%d %b %Y')} "
+        f"({len(recent)} dated + {len(undated)} undated matches)"
+    )
+    msg["From"] = sender
+    msg["To"] = recipient
+
+    lines = [
+        f"THARUN'S DAILY .NET / C# / AZURE JOB RADAR — {local_now.strftime('%d %b %Y %I:%M %p IST')}",
+        "",
+        f"Relevant leads found: {total}",
+        f"Posting date verified within 24 hours: {len(recent)}",
+        f"Date not verified (check the original listing): {len(undated)}",
+        "Target: Hyderabad / India-eligible Remote | Experience: about 4 years | Salary goal: 15–20 LPA",
+        "Ranking: .NET/C# relevance, role-title match, location, skill overlap and recency.",
+        "Salary is not used as a hard filter because many employers do not disclose it.",
+        "",
+        "SOURCE HEALTH"
+    ]
+    for name, status in statuses.items():
+        lines.append(f"- {name}: {status}")
+
+    if recent:
+        lines += ["", "RECENT MATCHES — ORIGINAL POSTING DATE WITHIN THE LAST 24 HOURS", ""]
+        for i, job in enumerate(recent, 1):
+            lines += [
+                f"{i}. [{job['score']}/100] {job['title']} — {job['company']}",
+                f"   Location: {job['location']} | Source: {job['source']}",
+                f"   Posted: {job['posted_label']} | Salary: {job['salary']}",
+                f"   Skills matched: {job['skills']}",
+                f"   Apply / details: {job['url']}",
+                ""
+            ]
+
+    if undated:
+        lines += [
+            "", "ADDITIONAL LEADS — POSTING DATE COULD NOT BE VERIFIED",
+            "These may be useful, but open the original page and confirm the job is still active and newly posted.",
+            ""
+        ]
+        for i, job in enumerate(undated, 1):
+            lines += [
+                f"{i}. [{job['score']}/100] {job['title']} — {job['company']}",
+                f"   Location: {job['location']} | Source: {job['source']}",
+                f"   Date: {job['posted_label']} | Salary: {job['salary']}",
+                f"   Skills matched: {job['skills']}",
+                f"   Apply / details: {job['url']}",
+                ""
+            ]
+
+    lines += ["", "LIVE PORTAL SEARCHES — OPEN THESE TO CHECK THE LATEST VACANCIES", ""]
+    for label, url in search_links():
+        lines.append(f"- {label}: {url}")
+
+    lines += [
+        "", "IMPORTANT",
+        "- This bot aggregates public feeds, official/public ATS endpoints and web-search results; it does not have privileged access to every job board.",
+        "- LinkedIn and Indeed are linked to live searches rather than scraped or logged into. Do not provide portal passwords to this workflow.",
+        "- Search-engine freshness is not proof of the employer's posting date. Verify the date, location eligibility, experience requirement and salary on the original listing.",
+        "- Never pay a recruiter or share OTPs, banking details or identity documents before verifying the employer."
+    ]
+    msg.set_content("\n".join(lines))
+
+    with smtplib.SMTP_SSL(
+        os.getenv("SMTP_HOST", "smtp.gmail.com"),
+        int(os.getenv("SMTP_PORT", "465"))
+    ) as smtp:
+        smtp.login(sender, password)
+        smtp.send_message(msg)
+
+    print(f"Sent job digest to {recipient}; {len(recent)} dated + {len(undated)} undated matches.")
+    print("Source health: " + " | ".join(f"{k}: {v}" for k, v in statuses.items()))
+
+
+if __name__ == "__main__":
+    main()
