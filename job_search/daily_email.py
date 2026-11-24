@@ -167,6 +167,16 @@ def add_job(rows, source, title, company, location, url, description="", posted_
     })
 
 
+def safe_error(exc):
+    message = str(exc)
+    for name in ("JOOBLE_API_KEY", "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "BRAVE_SEARCH_API_KEY"):
+        secret = os.getenv(name)
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    message = re.sub(r"(?i)(app_id|app_key|api_key|key)=([^&\\s]+)", r"\\1=[redacted]", message)
+    return message[:180]
+
+
 def portal_company(url):
     try:
         host = urlsplit(url).netloc.lower().removeprefix("www.")
@@ -384,7 +394,7 @@ def collect():
             else:
                 statuses[name] = f"OK — {len(rows) - before} relevant jobs"
         except Exception as exc:
-            statuses[name] = f"FAILED — {type(exc).__name__}: {str(exc)[:180]}"
+            statuses[name] = f"FAILED — {type(exc).__name__}: {safe_error(exc)}"
             print(f"[{name}] {statuses[name]}")
 
     # De-duplicate identical application pages while keeping the strongest listing.
