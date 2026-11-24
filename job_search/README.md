@@ -16,10 +16,9 @@ A personal daily job discovery workflow for Tharun's profile. It runs at **8:00 
 - Ashby public job boards
 - SmartRecruiters public company postings
 
-### Optional job-search APIs
-- Adzuna India API
-- Jooble India REST API
-- Brave Search API for freshness-filtered discovery across public job-board pages and employer career sites; portal coverage depends on what the search engine indexes
+### Discovery coverage
+- Uses only free public feeds and employer ATS endpoints; employer-board IDs remain optional configuration.
+- No paid Adzuna, Jooble or Brave credentials are required.
 
 ### Portal searches included in every email
 - LinkedIn Hyderabad / India-remote filters
@@ -52,15 +51,6 @@ In **Settings → Secrets and variables → Actions → Repository secrets**, ad
 | `SMTP_USER` | Gmail sender address |
 | `SMTP_APP_PASSWORD` | Gmail App Password (not your normal Gmail password) |
 | `JOB_ALERT_TO` | Recipient email address |
-
-Optional API secrets:
-
-| Secret | Purpose |
-|---|---|
-| `ADZUNA_APP_ID` | Adzuna API application ID |
-| `ADZUNA_APP_KEY` | Adzuna API application key |
-| `JOOBLE_API_KEY` | Jooble API key issued for India |
-| `BRAVE_SEARCH_API_KEY` | Brave Search API subscription token |
 
 ## Optional GitHub Actions variables
 
