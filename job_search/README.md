@@ -19,7 +19,7 @@ A personal daily job discovery workflow for Tharun's profile. It runs at **8:00 
 ### Optional job-search APIs
 - Adzuna India API
 - Jooble India REST API
-- Brave Search API for freshness-filtered discovery across indexed job sites, including results from major portals
+- Brave Search API for freshness-filtered discovery across public job-board pages and employer career sites; portal coverage depends on what the search engine indexes
 
 ### Portal searches included in every email
 - LinkedIn Hyderabad / India-remote filters
@@ -29,7 +29,7 @@ A personal daily job discovery workflow for Tharun's profile. It runs at **8:00 
 - Foundit, Hirist, Cutshort and Instahyre
 - Employer career-site search
 
-The workflow does **not** log in to portals or bypass CAPTCHAs, paywalls, robots rules or anti-bot controls. LinkedIn, Indeed and Naukri are provided as live search links and may also appear in the optional web-search results when indexed. Search indexing is not equivalent to a guaranteed live posting.
+The workflow does **not** log in to portals or bypass CAPTCHAs, paywalls, robots rules or anti-bot controls. LinkedIn, Indeed and Naukri are provided as live search links only; their page contents are not scraped or pulled into the email. Search indexing is not equivalent to a guaranteed live posting.
 
 ## Email ranking and freshness
 
