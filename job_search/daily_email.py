@@ -287,7 +287,7 @@ def collect_jooble(rows):
         return "not configured"
     for location in ("Hyderabad", "India Remote"):
         data = fetch_json(
-            f"https://jooble.org/api/{api_key}", method="POST",
+            f"{os.getenv('JOOBLE_API_BASE_URL', 'https://in.jooble.org/api').rstrip('/')}/{api_key}", method="POST",
             payload={
                 "keywords": ".NET C# ASP.NET Core Azure backend developer",
                 "location": location, "page": 1, "ResultOnPage": 50
