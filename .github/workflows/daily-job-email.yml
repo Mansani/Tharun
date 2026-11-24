@@ -15,19 +15,26 @@ concurrency:
 jobs:
   send-digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install requests
+        run: pip install --disable-pip-version-check requests
       - name: Search jobs and email digest
         env:
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-          JOB_ALERT_TO: ${{ secrets.JOB_ALERT_TO }}
-          GREENHOUSE: ${{ vars.GREENHOUSE }}
-          LEVER: ${{ vars.LEVER }}
+          SMTP_USER: \${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: \${{ secrets.SMTP_APP_PASSWORD }}
+          JOB_ALERT_TO: \${{ secrets.JOB_ALERT_TO }}
+          GREENHOUSE: \${{ vars.GREENHOUSE }}
+          LEVER: \${{ vars.LEVER }}
+          ASHBY: \${{ vars.ASHBY }}
+          SMARTRECRUITERS: \${{ vars.SMARTRECRUITERS }}
+          ADZUNA_APP_ID: \${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: \${{ secrets.ADZUNA_APP_KEY }}
+          JOOBLE_API_KEY: \${{ secrets.JOOBLE_API_KEY }}
+          JOOBLE_API_BASE_URL: \${{ vars.JOOBLE_API_BASE_URL }}
+          BRAVE_SEARCH_API_KEY: \${{ secrets.BRAVE_SEARCH_API_KEY }}
         run: python job_search/daily_email.py
